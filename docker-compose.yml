@@ -1,0 +1,198 @@
+# ============================================================
+# TaskQ — Docker Compose
+#
+# Startup order and migration ownership:
+#
+#   postgres (healthy)  ─┐
+#   redis    (healthy)  ─┤──► backend  → runs "alembic upgrade head"
+#                         │             → starts uvicorn
+#                         │             → becomes healthy (/ready returns 200)
+#                         │
+#                         ├──► worker  → waits for backend /ready
+#                         │             → starts celery worker
+#                         │
+#                         ├──► beat    → waits for backend /ready
+#                         │             → starts celery beat
+#                         │
+#                         └──► flower  → waits for backend /ready
+#                                       → starts celery flower
+#
+# ONLY the backend service runs "alembic upgrade head".
+# Worker, Beat, and Flower never touch Alembic.
+# ============================================================
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: taskq-postgres
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-taskq_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB:       ${POSTGRES_DB:-taskq}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:         ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taskq_user} -d ${POSTGRES_DB:-taskq}"]
+      interval:     5s
+      timeout:      5s
+      retries:      10
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: taskq-redis
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test:         ["CMD", "redis-cli", "ping"]
+      interval:     5s
+      timeout:      5s
+      retries:      10
+      start_period: 5s
+    restart: unless-stopped
+
+  # ── FastAPI Backend ──────────────────────────────────────────────────────
+  # THIS IS THE ONLY SERVICE THAT RUNS ALEMBIC MIGRATIONS.
+  # entrypoint.sh: waits for Postgres → alembic upgrade head → uvicorn
+  backend:
+    build:
+      context:    ./backend
+      dockerfile: Dockerfile
+    container_name: taskq-backend
+    entrypoint: ["./entrypoint.sh"]
+    ports:
+      - "8000:8000"
+    environment:
+      SECRET_KEY:   ${SECRET_KEY:?SECRET_KEY must be set in .env}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-taskq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-taskq}
+      PGHOST:       postgres
+      PGUSER:       ${POSTGRES_USER:-taskq_user}
+      PGDATABASE:   ${POSTGRES_DB:-taskq}
+      REDIS_URL:              redis://redis:6379/0
+      CELERY_BROKER_URL:      redis://redis:6379/1
+      CELERY_RESULT_BACKEND:  redis://redis:6379/2
+      SMTP_SERVER:   ${SMTP_SERVER:-smtp.gmail.com}
+      SMTP_PORT:     ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      EMAIL_FROM:    ${EMAIL_FROM:-noreply@taskq.io}
+      APP_ENV:       ${APP_ENV:-production}
+      LOG_LEVEL:     ${LOG_LEVEL:-INFO}
+      ALLOWED_ORIGINS: http://localhost:3000,http://frontend:80
+    volumes:
+      - backend_storage:/app/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Celery Worker ────────────────────────────────────────────────────────
+  # entrypoint.worker.sh: waits for backend /ready → celery worker
+  # Does NOT run migrations. Schema is guaranteed ready because /ready
+  # only returns 200 after alembic upgrade head has completed.
+  worker:
+    build:
+      context:    ./backend
+      dockerfile: Dockerfile
+    container_name: taskq-worker
+    entrypoint: ["./entrypoint.worker.sh"]
+    environment:
+      SECRET_KEY:             ${SECRET_KEY}
+      DATABASE_URL:           postgresql+asyncpg://${POSTGRES_USER:-taskq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-taskq}
+      REDIS_URL:              redis://redis:6379/0
+      CELERY_BROKER_URL:      redis://redis:6379/1
+      CELERY_RESULT_BACKEND:  redis://redis:6379/2
+      SMTP_SERVER:            ${SMTP_SERVER:-smtp.gmail.com}
+      SMTP_PORT:              ${SMTP_PORT:-587}
+      SMTP_USERNAME:          ${SMTP_USERNAME:-}
+      SMTP_PASSWORD:          ${SMTP_PASSWORD:-}
+      EMAIL_FROM:             ${EMAIL_FROM:-noreply@taskq.io}
+      APP_ENV:                ${APP_ENV:-production}
+      LOG_LEVEL:              ${LOG_LEVEL:-INFO}
+      BACKEND_URL:            http://backend:8000
+    volumes:
+      - backend_storage:/app/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Celery Beat Scheduler ────────────────────────────────────────────────
+  # entrypoint.beat.sh: waits for backend /ready → celery beat
+  # Does NOT run migrations.
+  beat:
+    build:
+      context:    ./backend
+      dockerfile: Dockerfile
+    container_name: taskq-beat
+    entrypoint: ["./entrypoint.beat.sh"]
+    environment:
+      SECRET_KEY:             ${SECRET_KEY}
+      DATABASE_URL:           postgresql+asyncpg://${POSTGRES_USER:-taskq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-taskq}
+      REDIS_URL:              redis://redis:6379/0
+      CELERY_BROKER_URL:      redis://redis:6379/1
+      CELERY_RESULT_BACKEND:  redis://redis:6379/2
+      APP_ENV:                ${APP_ENV:-production}
+      LOG_LEVEL:              ${LOG_LEVEL:-INFO}
+      BACKEND_URL:            http://backend:8000
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Flower (Celery Monitoring UI) ────────────────────────────────────────
+  # entrypoint.flower.sh: waits for backend /ready → celery flower
+  # Does NOT run migrations.
+  flower:
+    build:
+      context:    ./backend
+      dockerfile: Dockerfile
+    container_name: taskq-flower
+    entrypoint: ["./entrypoint.flower.sh"]
+    ports:
+      - "5555:5555"
+    environment:
+      SECRET_KEY:             ${SECRET_KEY}
+      DATABASE_URL:           postgresql+asyncpg://${POSTGRES_USER:-taskq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-taskq}
+      REDIS_URL:              redis://redis:6379/0
+      CELERY_BROKER_URL:      redis://redis:6379/1
+      CELERY_RESULT_BACKEND:  redis://redis:6379/2
+      APP_ENV:                ${APP_ENV:-production}
+      BACKEND_URL:            http://backend:8000
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── React Frontend ────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context:    ./frontend
+      dockerfile: Dockerfile
+    container_name: taskq-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_storage:
