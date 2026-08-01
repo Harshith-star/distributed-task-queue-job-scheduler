@@ -26,7 +26,7 @@ async def list_tasks(current_user=Depends(get_current_user), db: AsyncSession = 
         d = TaskOut.model_validate(task)
         d.total_executions = counts["total"]
         d.successful_executions = counts["successful"]
-        if hasattr(task, "schedule") and task.schedule:
+        if task.schedule:
             d.next_run_at = task.schedule.next_run_at
             d.last_run_at = task.schedule.last_run_at
         enriched.append(d)
@@ -47,7 +47,7 @@ async def get_task(task_id: int, current_user=Depends(get_current_user), db: Asy
 
 @router.put("/{task_id}", response_model=TaskOut)
 async def update_task(task_id: int, payload: UpdateTaskRequest, request: Request, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    data = {k: v for k, v in payload.model_dump(mode="json").items() if v is not None}
     return await TaskService(db).update_task(task_id, current_user.id, data, ip=request.client.host if request.client else "")
 
 @router.delete("/{task_id}", status_code=204)
@@ -66,3 +66,5 @@ async def resume_task(task_id: int, current_user=Depends(get_current_user), db: 
 async def trigger_now(task_id: int, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     ex = await TaskService(db).trigger_now(task_id, current_user.id)
     return {"execution_id": ex.id, "status": ex.status.value, "message": "Task queued for immediate execution"}
+
+  

@@ -58,8 +58,8 @@ class Settings(BaseSettings):
     SMTP_USERNAME: str = ""
     SMTP_PASSWORD: str = ""
     EMAIL_FROM: str = "noreply@taskq.io"
-
-    # ── Celery tuning ────────────────────────────────────────────────
+    EMAIL_FROM_NAME: str = "TaskQ"
+    # ── Celery tuning ──────────────────────────────────────────────
     CELERY_MAX_RETRIES: int = 3
     CELERY_RETRY_BACKOFF: int = 60   # seconds; doubles on each retry
     CELERY_TASK_TIMEOUT: int = 300   # seconds per task

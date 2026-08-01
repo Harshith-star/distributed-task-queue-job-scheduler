@@ -63,7 +63,9 @@ export default function CreateTaskModal({ onClose }) {
     const payload = {
       ...form,
       tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
-      scheduled_at: form.schedule_type === 'one_time' ? form.scheduled_at : null,
+      scheduled_at: form.schedule_type === 'one_time' && form.scheduled_at
+        ? new Date(form.scheduled_at).toISOString()
+        : null,
       cron_expression: form.schedule_type === 'cron' ? form.cron_expression : null,
     };
     mutation.mutate(payload);

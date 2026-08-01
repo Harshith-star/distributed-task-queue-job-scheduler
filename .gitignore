@@ -32,3 +32,5 @@ htmlcov/
 
 # Local storage
 backend/backups/
+backend/backup.sql
+backend/backups-local/

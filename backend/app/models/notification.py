@@ -25,7 +25,7 @@ class Notification(Base, TimestampMixin):
     user_id:      Mapped[int]              = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     task_id:      Mapped[int | None]       = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     execution_id: Mapped[int | None]       = mapped_column(Integer, nullable=True)
-    type:         Mapped[NotificationType] = mapped_column(Enum(NotificationType, name="notiftype"), nullable=False)
+    type:         Mapped[NotificationType] = mapped_column(Enum(NotificationType, name="notiftype",values_callable=lambda enum_cls: [e.value for e in enum_cls],), nullable=False)
     title:        Mapped[str]              = mapped_column(String(300), nullable=False)
     message:      Mapped[str]              = mapped_column(Text, nullable=False)
     is_read:      Mapped[bool]             = mapped_column(Boolean, default=False, nullable=False)

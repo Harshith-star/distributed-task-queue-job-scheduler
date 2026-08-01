@@ -2,7 +2,7 @@
 import json
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
-
+from sqlalchemy import case
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.repositories.task_repository import TaskRepository
@@ -114,10 +114,10 @@ class AnalyticsService:
                     cast(TaskExecution.started_at, Date).label("date"),
                     func.count(TaskExecution.id).label("total"),
                     func.sum(
-                        func.case((TaskExecution.status == ExecutionStatus.COMPLETED, 1), else_=0)
+                        case((TaskExecution.status == ExecutionStatus.COMPLETED, 1), else_=0)
                     ).label("completed"),
                     func.sum(
-                        func.case((TaskExecution.status == ExecutionStatus.FAILED, 1), else_=0)
+                        case((TaskExecution.status == ExecutionStatus.FAILED, 1), else_=0)
                     ).label("failed"),
                 )
                 .where(

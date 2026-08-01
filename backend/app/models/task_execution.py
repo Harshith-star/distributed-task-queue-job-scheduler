@@ -28,7 +28,7 @@ class TaskExecution(Base, TimestampMixin):
     task_id:        Mapped[int]              = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
     celery_task_id: Mapped[str | None]       = mapped_column(String(200), nullable=True, index=True)
     status:         Mapped[ExecutionStatus]  = mapped_column(
-        Enum(ExecutionStatus, name="executionstatus"),
+        Enum(ExecutionStatus, name="executionstatus", values_callable=lambda enum_cls: [e.value for e in enum_cls],),
         default=ExecutionStatus.QUEUED,
         nullable=False,
     )

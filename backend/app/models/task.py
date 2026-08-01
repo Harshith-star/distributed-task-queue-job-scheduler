@@ -45,9 +45,9 @@ class Task(Base, TimestampMixin):
     user_id:         Mapped[int]         = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name:            Mapped[str]         = mapped_column(String(200), nullable=False)
     description:     Mapped[str | None]  = mapped_column(Text, nullable=True)
-    task_type:       Mapped[TaskType]    = mapped_column(Enum(TaskType, name="tasktype"), nullable=False)
-    status:          Mapped[TaskStatus]  = mapped_column(Enum(TaskStatus, name="taskstatus"), default=TaskStatus.ACTIVE, nullable=False)
-    schedule_type:   Mapped[ScheduleType]= mapped_column(Enum(ScheduleType, name="scheduletype"), nullable=False)
+    task_type:       Mapped[TaskType]    = mapped_column(Enum(TaskType, name="tasktype", values_callable=lambda enum_cls: [e.value for e in enum_cls],), nullable=False)
+    status:          Mapped[TaskStatus]  = mapped_column(Enum(TaskStatus, name="taskstatus", values_callable=lambda enum_cls: [e.value for e in enum_cls],), default=TaskStatus.ACTIVE, nullable=False)
+    schedule_type:   Mapped[ScheduleType]= mapped_column(Enum(ScheduleType, name="scheduletype", values_callable=lambda enum_cls: [e.value for e in enum_cls],), nullable=False)
     cron_expression: Mapped[str | None]  = mapped_column(String(100), nullable=True)   # for CRON type
     scheduled_at:    Mapped[str | None]  = mapped_column(String(50), nullable=True)     # ISO datetime for ONE_TIME
     task_config:     Mapped[dict]        = mapped_column(JSON, default=dict, nullable=False)
